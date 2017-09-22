@@ -22,28 +22,6 @@ _smartLib.GetHeaderVersion.restype = c_byte
 
 _drive = ''
 
-def Initial(_driveName:str):
-    global _drive
-    _drive = _driveName
-    # Use SMART Version 2 transaction
-    _smartLib.SetTransactionVersion(2) 
-    
-def Read():
-    global _drive
-    strBuf = create_string_buffer(_drive.encode('utf-8'))
-    _smartLib.SetDiskName(strBuf)        
-    _smartLib.GetSmartInfo.restype = c_byte
-    ret = _smartLib.GetSmartInfo()
-    
-    _smartLib.CloseDeviceHandle()
-
-    return ret
-
-def GetErrorMessage():
-    _smartLib.GetErrorMessage.restype = c_char_p
-    ret = _smartLib.GetErrorMessage()
-    return ret.decode('utf-8')
-
 class BasicSmartInfo:
     def __init__(self):
         self.MPVersionStr = ''
@@ -110,9 +88,36 @@ class BasicSmartInfo:
                     else:
                         txt += '{: <22}: {}\n'.format(key, str(value))
         return txt
+
+basicInfo = BasicSmartInfo()
+
+def Initial(_driveName:str):
+    global _drive
+    _drive = _driveName
+    # Use SMART Version 2 transaction
+    _smartLib.SetTransactionVersion(2) 
+    
+def Read():
+    global _drive, basicInfo
+    strBuf = create_string_buffer(_drive.encode('utf-8'))
+    _smartLib.SetDiskName(strBuf)        
+    _smartLib.GetSmartInfo.restype = c_byte
+    ret = _smartLib.GetSmartInfo()
+    # Update basic smart info data
+    basicInfo.reset()
+    _smartLib.CloseDeviceHandle()
+
+    return ret
+
+def GetErrorMessage():
+    _smartLib.GetErrorMessage.restype = c_char_p
+    ret = _smartLib.GetErrorMessage()
+    return ret.decode('utf-8')
         
 def GetBasicSmartInfo():
-    info = BasicSmartInfo()
-    info.reset()
+    global basicInfo
+    return basicInfo
 
-    return info
+def GetEraseCountRawData():
+    global basicInfo
+    buffSize = basicInfo.TotalVBCount

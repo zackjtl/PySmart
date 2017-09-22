@@ -3,7 +3,7 @@ import logging
 
 def dotest():    
     logging.basicConfig(level=logging.INFO)
-    PySmart.Initial('K:')
+    PySmart.Initial('D:')
     
     logging.info('SMART initialized')
     logging.info('Read SMART')
