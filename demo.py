@@ -3,20 +3,20 @@ import logging
 
 def dotest():    
     logging.basicConfig(level=logging.INFO)
-    PySmart.Initial('D:')
+
+    smart = PySmart.SmartInfo()
     
     logging.info('SMART initialized')
     logging.info('Read SMART')
 
-    ret = PySmart.Read()        
+    ret = smart.Read('D:')
+
     logging.info('result: {}'.format(ret))
 
     if (ret != 0):
-        print('got error:', PySmart.GetErrorMessage())
-
-    info = PySmart.GetBasicSmartInfo()   
-
-    print(info)
+        print('got error:', smart.GetErrorMessage())
+    
+    print(smart.BasicInfo)
     
 
 if __name__ == '__main__':

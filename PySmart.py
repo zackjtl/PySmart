@@ -1,9 +1,12 @@
-import osinfo
 import re
+
 from ctypes import *
+from . import osinfo
+from . import smartHeader
+from . import basicSmartInfo
 
 _libPath = osinfo.libdir + '\\SmartSDK_1288_Win32.dll'
-_smartLib = WinDLL(_libPath)
+_smartLib = windll.LoadLibrary(_libPath)
 
 _smartLib.GetMPVersion.restype = c_char_p
 _smartLib.GetFlashType.restype = c_char_p
@@ -20,104 +23,57 @@ _smartLib.GetECCCapacity.restype = c_byte
 _smartLib.GetEraseCountOffset.restype = c_ushort
 _smartLib.GetHeaderVersion.restype = c_byte
 
+_smartLib.GetSmartHeader.restype = smartHeader.SmartHeader
+_smartLib.GetDetailEraseCount.restype = c_ubyte
+
 _drive = ''
 
-class BasicSmartInfo:
+class SmartInfo:
     def __init__(self):
-        self.MPVersionStr = ''
-        self.FlashTypeStr = ''
-        self.FlashIDStr = ''
-        self.TotalCECount = 0
-        self.ECCCapacity = 0
-        self.HWVersionStr = ''
-        self.FWVersionStr = ''
-        self.AbnormalShutdownCount = 0
-        self.ECCUncCount = 0
-        self.PowerCycleCount = 0
-        self.FactoryBadBlocks = 0
-        self.MininumSpareBlocks = 0
-        self.LaterBadBlocks = 0
-        self.TotalEraseCount = 0
-        self.AverageEraseCount = 0
-        self.MaximumEraseCount = 0 
-        self.MinimumEraseCount = 0
-        self.LifeIndicator = 0.0
-        self.TotalVBCount = 0
-        self.VBMultiplier = 0
-        self.HeaderVersion = 0
-        self.EraseCountOffset = 0
+        global _smartLib
+        self.BasicInfo = basicSmartInfo.BasicSmartInfo()
+        self.SmartHeader = smartHeader.SmartHeader()
+        self._totalVBs = 0
+        _smartLib.SetTransactionVersion(2)         
     
-    def reset(self):
-        self.MPVersionStr = _smartLib.GetMPVersion().decode('utf-8')
-        self.FlashTypeStr = _smartLib.GetFlashType().decode('utf-8')
-        self.FlashIDStr = _smartLib.GetFlashID().decode('utf-8')
-        self.TotalCECount = int(_smartLib.GetTotalCECount())
-        self.ECCCapacity = int(_smartLib.GetECCCapacity())
-        self.HWVersionStr = _smartLib.GetHWVersion().decode('utf-8')
-        self.FWVersionStr = _smartLib.GetFWVersion().decode('utf-8')
-        self.AbnormalShutdownCount = int(_smartLib.GetAbnormalShutdownCount())
-        self.ECCUncCount = int(_smartLib.GetECCUncorrectableCount())
-        self.PowerCycleCount = _smartLib.GetPowerCycleCount()
-        self.FactoryBadBlocks = int(_smartLib.GetInitialBadBlockCount())
-        self.MininumSpareBlocks = int(_smartLib.GetMinSpareBlockCount())
-        self.LaterBadBlocks = int(_smartLib.GetLaterBadBlockCount())
-        self.TotalEraseCount = _smartLib.GetTotalEraseCount()
-        self.AverageEraseCount = _smartLib.GetAverageEraseCount()
-        self.MaximumEraseCount = _smartLib.GetMaxEraseCount()
-        self.MinimumEraseCount = _smartLib.GetMinEraseCount()
-        self.LifeIndicator = _smartLib.GetRemainingLife()
-        self.TotalVBCount = _smartLib.GetTotalVBCountOfFlash()
-        self.VBMultiplier = _smartLib.GetVBMultiplier()
-        self.HeaderVersion = int(_smartLib.GetHeaderVersion())
-        self.EraseCountOffset = int(_smartLib.GetEraseCountOffset())        
+    def Read(self, DriveName:str):
+        global _smartLib
+        strBuf = create_string_buffer(DriveName.encode('utf-8'))
+        _smartLib.SetDiskName(strBuf)        
+        _smartLib.GetSmartInfo.restype = c_byte
+        ret = _smartLib.GetSmartInfo()
+        # Update basic smart info data
+        self.BasicInfo.reset(_smartLib)
+        self.SmartHeader = _smartLib.GetSmartHeader()
 
-    def __str__(self):
-        txt = ''
-        #members = dir(self)
-        for key in self.__dict__:
-            if not key.startswith('__') and not key.endswith('__'):                
-                value = self.__dict__[key]
-                
-                if not re.match('<function.*?>', str(value)):
-                    #field = 'self.{}'.format(key)     
-                    if (key is 'LifeIndicator'):   
-                        val_str = str(value)
-                        point_at = val_str.find('.')
-                        end_pos = min(len(val_str), point_at+3)
-                        txt += '{: <22}: {} %\n'.format(key, val_str[:end_pos])
-                    else:
-                        txt += '{: <22}: {}\n'.format(key, str(value))
-        return txt
+        if (self.SmartHeader.VB_GapOffset == 0):
+            dieCount = 1
+        else:
+           dieCount = (self.SmartHeader.TotalVBCountOfFlash / self.SmartHeader.VB_GapOffset) 
 
-basicInfo = BasicSmartInfo()
+        self._totalVBs = self.SmartHeader.TotalVBCountWithHash + ((dieCount  -1) * self.SmartHeader.VB_GapNumber)
 
-def Initial(_driveName:str):
-    global _drive
-    _drive = _driveName
-    # Use SMART Version 2 transaction
-    _smartLib.SetTransactionVersion(2) 
-    
-def Read():
-    global _drive, basicInfo
-    strBuf = create_string_buffer(_drive.encode('utf-8'))
-    _smartLib.SetDiskName(strBuf)        
-    _smartLib.GetSmartInfo.restype = c_byte
-    ret = _smartLib.GetSmartInfo()
-    # Update basic smart info data
-    basicInfo.reset()
-    _smartLib.CloseDeviceHandle()
+        buffLen = self._totalVBs * sizeof(c_uint32)
+        arrayType = c_uint32 * self._totalVBs
 
-    return ret
+        retBuffLen = c_ulong()
 
-def GetErrorMessage():
-    _smartLib.GetErrorMessage.restype = c_char_p
-    ret = _smartLib.GetErrorMessage()
-    return ret.decode('utf-8')
+        self.EraseCountRawData = arrayType()
+        _smartLib.GetDetailEraseCount(self.EraseCountRawData, buffLen, byref(retBuffLen))
+
+        #self.EechVBEraseCount = list(self.EraseCountRawData)
+
+        _smartLib.CloseDeviceHandle()
+
+        return ret    
+
+    def GetErrorMessage(self):
+        global _smartLib
+        _smartLib.GetErrorMessage.restype = c_char_p
+        ret = _smartLib.GetErrorMessage()
+        return ret.decode('utf-8')
         
-def GetBasicSmartInfo():
-    global basicInfo
-    return basicInfo
 
-def GetEraseCountRawData():
-    global basicInfo
-    buffSize = basicInfo.TotalVBCount
+    def GetEraseCountRawData():
+        global basicInfo
+        buffSize = basicInfo.TotalVBCount
